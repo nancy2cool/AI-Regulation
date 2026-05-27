@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>U.S. State AI Regulation Index</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f1f5f9;
+      color: #1e293b;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #0f172a;
+      color: #fff;
+      padding: 20px 40px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    header h1 {
+      font-size: 1.55rem;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      line-height: 1.2;
+    }
+    header h1 span {
+      color: #38bdf8;
+    }
+    header p {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
+    .header-meta {
+      text-align: right;
+      font-size: 0.75rem;
+      color: #64748b;
+    }
+    .header-meta strong {
+      display: block;
+      color: #94a3b8;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* ── Layout ── */
+    .main-layout {
+      display: flex;
+      height: calc(100vh - 80px);
+      overflow: hidden;
+    }
+
+    /* ── Map panel ── */
+    .map-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 24px 24px 16px;
+      overflow: hidden;
+      transition: flex 0.35s ease;
+      position: relative;
+    }
+    .map-panel.panel-open { flex: 0 0 55%; }
+
+    #map {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+    #map svg {
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+      display: block;
+    }
+    #map svg.dragging { cursor: grabbing; }
+
+    .state-path {
+      stroke: #fff;
+      stroke-width: 0.6;
+      cursor: pointer;
+    }
+    .state-path:hover { opacity: 0.82; filter: brightness(1.1); }
+    .state-path.active { stroke: #0f172a; stroke-width: 2; }
+
+    /* ── Zoom controls ── */
+    .zoom-controls {
+      position: absolute;
+      top: 30px;
+      left: 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      z-index: 10;
+    }
+    .zoom-btn {
+      width: 30px;
+      height: 30px;
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #475569;
+      box-shadow: 0 1px 5px rgba(0,0,0,0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      transition: background 0.12s, color 0.12s;
+      user-select: none;
+    }
+    .zoom-btn:hover { background: #f1f5f9; color: #0f172a; }
+    .zoom-btn.reset { font-size: 0.7rem; letter-spacing: 0; font-weight: 600; }
+
+    /* ── Legend ── */
+    .legend {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .legend-title {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      margin-right: 6px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.7rem;
+      color: #475569;
+    }
+    .legend-swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.08);
+    }
+
+    /* ── Tooltip ── */
+    #tooltip {
+      position: fixed;
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      z-index: 9999;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+      min-width: 160px;
+    }
+    #tooltip .tt-state { font-weight: 700; font-size: 0.9rem; margin-bottom: 4px; }
+    #tooltip .tt-score { color: #38bdf8; font-weight: 600; }
+    #tooltip .tt-hint { color: #64748b; font-size: 0.7rem; margin-top: 4px; }
+
+    /* ── Detail panel ── */
+    .detail-panel {
+      width: 0;
+      overflow: hidden;
+      background: #fff;
+      border-left: 1px solid #e2e8f0;
+      transition: width 0.35s ease;
+      display: flex;
+      flex-direction: column;
+    }
+    .detail-panel.open { width: 45%; min-width: 380px; }
+
+    .detail-inner {
+      padding: 28px 28px 40px;
+      overflow-y: auto;
+      height: 100%;
+    }
+
+    /* ── Detail header ── */
+    .detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 20px;
+    }
+    .detail-state-name {
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: #0f172a;
+      line-height: 1;
+    }
+    .btn-close {
+      background: #f1f5f9;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 1rem;
+      color: #64748b;
+      transition: background 0.15s;
+      line-height: 1;
+    }
+    .btn-close:hover { background: #e2e8f0; color: #1e293b; }
+
+    /* ── Score summary ── */
+    .score-summary {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .score-circle {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      border: 3px solid;
+    }
+    .score-circle .sc-num {
+      font-size: 1.5rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .score-circle .sc-denom {
+      font-size: 0.6rem;
+      color: inherit;
+      opacity: 0.65;
+    }
+    .score-info { flex: 1; }
+    .score-info .rating-badge {
+      display: inline-block;
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 3px 9px;
+      border-radius: 20px;
+      color: #fff;
+      margin-bottom: 7px;
+    }
+    .score-info .score-label {
+      font-size: 0.82rem;
+      color: #475569;
+      line-height: 1.5;
+    }
+    .score-info .score-bar-wrap {
+      background: #e2e8f0;
+      border-radius: 4px;
+      height: 6px;
+      margin-top: 9px;
+      overflow: hidden;
+    }
+    .score-info .score-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.6s ease;
+    }
+    .score-info .score-bar-label {
+      font-size: 0.68rem;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
+
+    /* ── Category section ── */
+    .category-section { margin-bottom: 28px; }
+    .category-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #64748b;
+      border-bottom: 2px solid #e2e8f0;
+      padding-bottom: 8px;
+      margin-bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .category-subtotal {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #1e293b;
+      letter-spacing: 0;
+    }
+
+    /* ── Question card ── */
+    .q-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+    .q-top {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      margin-bottom: 10px;
+    }
+    .q-num {
+      background: #0f172a;
+      color: #fff;
+      font-size: 0.65rem;
+      font-weight: 700;
+      border-radius: 4px;
+      padding: 3px 7px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .q-text {
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: #1e293b;
+      line-height: 1.45;
+    }
+
+    .q-score-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 11px;
+    }
+    .q-dots { display: flex; gap: 4px; }
+    .dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #e2e8f0;
+    }
+    .dot.filled { background: currentColor; }
+    .q-score-num {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #475569;
+    }
+
+    .q-law {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #0f172a;
+      margin-bottom: 5px;
+    }
+    .q-evidence {
+      font-size: 0.78rem;
+      color: #475569;
+      line-height: 1.55;
+      margin-bottom: 8px;
+    }
+    .q-note {
+      background: #fefce8;
+      border-left: 3px solid #eab308;
+      padding: 6px 10px;
+      font-size: 0.72rem;
+      color: #713f12;
+      border-radius: 0 6px 6px 0;
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+    .q-sources { margin-top: 6px; }
+    .q-sources-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #94a3b8;
+      margin-bottom: 3px;
+    }
+    .q-sources a {
+      display: block;
+      font-size: 0.72rem;
+      color: #2563eb;
+      text-decoration: none;
+      word-break: break-all;
+      line-height: 1.5;
+    }
+    .q-sources a:hover { text-decoration: underline; }
+
+    /* ── "Not yet evaluated" placeholder ── */
+    .not-scored-msg {
+      text-align: center;
+      padding: 60px 20px;
+      color: #94a3b8;
+    }
+    .not-scored-msg svg { margin-bottom: 12px; opacity: 0.4; }
+    .not-scored-msg p { font-size: 0.9rem; }
+
+    /* ── Color helpers ── */
+    .color-very-weak   { color: #dc2626; border-color: #dc2626; }
+    .color-weak        { color: #ea580c; border-color: #ea580c; }
+    .color-partial     { color: #ca8a04; border-color: #ca8a04; }
+    .color-strong      { color: #16a34a; border-color: #16a34a; }
+    .color-comprehensive { color: #15803d; border-color: #15803d; }
+
+    .bg-very-weak        { background: #dc2626; }
+    .bg-weak             { background: #ea580c; }
+    .bg-partial          { background: #ca8a04; }
+    .bg-strong           { background: #16a34a; }
+    .bg-comprehensive    { background: #15803d; }
+
+    .fill-very-weak   { background: #dc2626; }
+    .fill-weak        { background: #ea580c; }
+    .fill-partial     { background: #ca8a04; }
+    .fill-strong      { background: #16a34a; }
+    .fill-comprehensive { background: #15803d; }
+
+    /* ── Map instructions ── */
+    .map-hint {
+      text-align: center;
+      font-size: 0.72rem;
+      color: #94a3b8;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>U.S. State <span>AI Regulation</span> Index</h1>
+  </div>
+  <div class="header-meta">
+    <strong>Last Updated</strong>
+    May 2026 &nbsp;·&nbsp; Practice Run (2 states)
+  </div>
+</header>
+
+<div class="main-layout">
+
+  <!-- Map Panel -->
+  <div class="map-panel" id="mapPanel">
+    <div id="map">
+      <!-- Zoom controls overlay -->
+      <div class="zoom-controls">
+        <button class="zoom-btn" onclick="zoomIn()" title="Zoom in">+</button>
+        <button class="zoom-btn reset" onclick="zoomReset()" title="Reset view">FIT</button>
+        <button class="zoom-btn" onclick="zoomOut()" title="Zoom out">−</button>
+      </div>
+    </div>
+    <div class="legend" id="legend">
+      <span class="legend-title">Score</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#dc2626"></span>Very Weak (0–4)</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#ea580c"></span>Weak (5–9)</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#ca8a04"></span>Partial (10–14)</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#16a34a"></span>Strong (15–19)</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#15803d"></span>Comprehensive (20–24)</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:#cbd5e1"></span>Not yet evaluated</span>
+    </div>
+    <p class="map-hint">Scroll to zoom · Drag to pan · Click state for scorecard</p>
+  </div>
+
+  <!-- Detail Panel -->
+  <div class="detail-panel" id="detailPanel">
+    <div class="detail-inner" id="detailInner">
+      <!-- filled by JS -->
+    </div>
+  </div>
+
+</div>
+
+<!-- Tooltip -->
+<div id="tooltip"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// STATE DATA
+// ════════════════════════════════════════════════════════════════
+const STATE_DATA = {
+
+  "Texas": {
+    fips: "48",
+    rawScore: 10,
+    maxRaw: 24,
+    lastUpdated: "May 2026",
+    categories: [
+      {
+        title: "Transparency and Accountability",
+        questions: [
+          {
+            id: "Q1",
+            score: 2,
+            text: "Does the state require users to be clearly informed when they are interacting with an AI chatbot or AI-generated content?",
+            law: "Texas Responsible AI Governance Act (TRAIGA) — HB 149, signed June 2025, eff. Jan 1, 2026",
+            evidence: "TRAIGA requires government agencies and healthcare providers to clearly disclose AI interaction before or at time of contact, in plain language and without dark patterns. Private-sector AI chatbots face NO general disclosure mandate under TRAIGA.",
+            note: "Disclosure obligations are limited to government agencies and healthcare providers only. Most private AI products are not covered.",
+            sources: [
+              { title: "HB 149 Analysis — Texas Legislature", url: "https://capitol.texas.gov/tlodocs/89R/analysis/html/HB00149S.htm" }
+            ]
+          },
+          {
+            id: "Q2",
+            score: 2,
+            text: "Does the state require AI companies to keep records, conduct audits, publish reports, or disclose risk-related information to regulators or the public?",
+            law: "TRAIGA — HB 149 (Sec. 553.102–553.103)",
+            evidence: "TRAIGA requires deployers of 'high-risk AI' (consequential decisions in employment, education, healthcare, housing, insurance, financial services, or government) to conduct documented impact assessments and file annual reports with the AG. Companies outside those sectors are exempt.",
+            note: "Scope limited to high-risk AI deployers in specific sectors. General-purpose AI companies have no audit or reporting obligation.",
+            sources: [
+              { title: "HB 149 Analysis — Texas Legislature", url: "https://capitol.texas.gov/tlodocs/89R/analysis/html/HB00149S.htm" }
+            ]
+          },
+          {
+            id: "Q3",
+            score: 2,
+            text: "Does the law include meaningful enforcement, such as attorney general authority, penalties, reporting obligations, or compliance review?",
+            law: "TRAIGA — HB 149 (Sec. 552.101–552.106)",
+            evidence: "TRAIGA provides AG-only enforcement with civil penalties of $10,000–$200,000 per violation, with daily accrual for continued violations. However, there is no private right of action, and a 60-day cure period applies to curable violations.",
+            note: "Cure period significantly weakens deterrence. Enforcement is also limited to the narrow scope of the law (government AI disclosure + high-risk AI deployers).",
+            sources: [
+              { title: "HB 149 Analysis — Texas Legislature", url: "https://capitol.texas.gov/tlodocs/89R/analysis/html/HB00149S.htm" }
+            ]
+          }
+        ]
+      },
+      {
+        title: "Youth Safety and Design Protections",
+        questions: [
+          {
+            id: "Q4",
+            score: 2,
+            text: "Does the state create special rules for minors or vulnerable users?",
+            law: "TRAIGA (Sec. 552.057) + Texas SCOPE Act (eff. Sept 1, 2024)",
+            evidence: "TRAIGA prohibits developing or distributing AI that produces CSAM or simulates sexual conduct while impersonating a minor. The Texas SCOPE Act (Securing Children Online through Parental Empowerment) requires digital service providers to protect minors broadly, but is not AI-specific.",
+            note: "No comprehensive AI-specific framework for minor protection beyond CSAM prohibition. The SCOPE Act covers general online platforms, not AI systems in particular.",
+            sources: [
+              { title: "HB 149 Analysis — Texas Legislature", url: "https://capitol.texas.gov/tlodocs/89R/analysis/html/HB00149S.htm" },
+              { title: "SCOPE Act — Texas AG", url: "https://www.texasattorneygeneral.gov/consumer-protection/file-consumer-complaint/consumer-privacy-rights/securing-children-online-through-parental-empowerment" }
+            ]
+          },
+          {
+            id: "Q5",
+            score: 1,
+            text: "Does the state require AI platforms to detect, escalate, or respond to serious risks such as self-harm, suicide, eating disorders, abuse, exploitation, or crisis situations?",
+            law: "TRAIGA — HB 149 (Sec. 552.052)",
+            evidence: "TRAIGA prohibits developing or deploying AI that 'intentionally aims to incite or encourage a person to commit physical self-harm, including suicide.' This is a prohibition on incitement only — no proactive detection, escalation, or crisis-referral protocol is required.",
+            note: "No Texas law requires AI platforms to actively detect self-harm signals, refer users to crisis services, or publish safety protocols.",
+            sources: [
+              { title: "HB 149 Analysis — Texas Legislature", url: "https://capitol.texas.gov/tlodocs/89R/analysis/html/HB00149S.htm" }
+            ]
+          },
+          {
+            id: "Q6",
+            score: 1,
+            text: "Does the state restrict or regulate risky chatbot design features, such as emotionally manipulative engagement, companion/romantic chatbot access for minors, addictive design, or unsafe personalization?",
+            law: "TRAIGA — HB 149 (Sec. 552.052–552.053)",
+            evidence: "TRAIGA contains a general prohibition on AI that 'intentionally aims to incite or encourage' self-harm and prohibits government social-scoring AI. There are no specific restrictions on companion/romantic chatbot design, addictive engagement features, or minor-targeted personalization.",
+            note: "No Texas law specifically addresses chatbot design architecture for youth safety. The prohibitions in TRAIGA are general and do not target design features.",
+            sources: [
+              { title: "HB 149 Analysis — Texas Legislature", url: "https://capitol.texas.gov/tlodocs/89R/analysis/html/HB00149S.htm" }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+
+  "California": {
+    fips: "06",
+    rawScore: 18,
+    maxRaw: 24,
+    lastUpdated: "May 2026",
+    categories: [
+      {
+        title: "Transparency and Accountability",
+        questions: [
+          {
+            id: "Q1",
+            score: 3,
+            text: "Does the state require users to be clearly informed when they are interacting with an AI chatbot or AI-generated content?",
+            law: "SB 942 (California AI Transparency Act, signed Sept 2024, eff. Jan 2026) + SB 243 (signed Oct 2025, eff. Jan 2026)",
+            evidence: "SB 942 requires large generative AI providers (1M+ monthly users) to offer AI-detection tools and embed provenance disclosures in AI-generated images, video, and audio. SB 243 separately requires companion chatbots to disclose AI nature whenever a user might believe they are talking to a human, with heightened notification rules for minors.",
+            note: "SB 942 covers AI-generated content (not chatbot interaction per se). SB 243 covers companion chatbots specifically. SB 1001 (2019) requires bot disclosure in commercial/political contexts.",
+            sources: [
+              { title: "SB 942 — California Legislature", url: "https://leginfo.legislature.ca.gov/faces/billNavClient.xhtml?bill_id=202320240SB942" },
+              { title: "SB 243 — California Legislature", url: "https://leginfo.legislature.ca.gov/faces/billNavClient.xhtml?bill_id=202520260SB243" }
+            ]
+          },
+          {
+            id: "Q2",
+            score: 3,
+            text: "Does the state require AI companies to keep records, conduct audits, publish reports, or disclose risk-related information to regulators or the public?",
+            law: "AB 2013 (Generative AI Training Data Transparency Act, signed Sept 2024, eff. Jan 2026) + CPPA ADMT Rules",
+            evidence: "AB 2013 requires AI developers to publicly post training data details (IP status, synthetic data use) on their websites. The California Privacy Protection Agency (CPPA) has independent authority to require risk assessments under Automated Decision-Making Technology (ADMT) rules.",
+            note: "AB 2013 does not specify a monetary penalty amount, which somewhat weakens enforcement. However, the AG retains authority to act under general California law.",
+            sources: [
+              { title: "AB 2013 — California Legislature", url: "https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202320240AB2013" },
+              { title: "CA AG Legal Advisory on AI", url: "https://oag.ca.gov/system/files/attachments/press-docs/Legal%20Advisory%20-%20Application%20of%20Existing%20CA%20Laws%20to%20Artificial%20Intelligence.pdf" }
+            ]
+          },
+          {
+            id: "Q3",
+            score: 3,
+            text: "Does the law include meaningful enforcement, such as attorney general authority, penalties, reporting obligations, or compliance review?",
+            law: "SB 942 ($5,000/day), SB 243 (private right of action), CPPA (independent authority)",
+            evidence: "SB 942 is enforced by the AG, city attorneys, and county counsel at $5,000/day per violation. SB 243 uniquely includes a private right of action — victims may sue for $1,000 per violation or actual damages, whichever is greater, plus attorney's fees. The CPPA has independent enforcement authority over ADMT.",
+            note: "Multiple overlapping enforcement mechanisms. Private right of action under SB 243 is stronger than TX TRAIGA's AG-only approach.",
+            sources: [
+              { title: "SB 942 — California Legislature", url: "https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202320240SB942" },
+              { title: "SB 243 — California Legislature", url: "https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202520260SB243" }
+            ]
+          }
+        ]
+      },
+      {
+        title: "Youth Safety and Design Protections",
+        questions: [
+          {
+            id: "Q4",
+            score: 3,
+            text: "Does the state create special rules for minors or vulnerable users?",
+            law: "SB 243 — Companion Chatbots (signed Oct 13, 2025, eff. Jan 1, 2026)",
+            evidence: "SB 243 creates minor-specific duties for companion chatbot operators: mandatory AI identity disclosure, default break-reminder notifications at least every 3 hours, and reasonable measures preventing sexually explicit material involving minors.",
+            note: "IMPORTANT: AB 2273 (Age-Appropriate Design Code Act) is largely ENJOINED by the 9th Circuit on First Amendment grounds (March 2026) and cannot be credited at full score. SB 243 is the primary enforceable minor-protection law.",
+            sources: [
+              { title: "SB 243 — California Legislature", url: "https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202520260SB243" },
+              { title: "Gov. Newsom on AB 2273 Court Ruling", url: "https://www.gov.ca.gov/2024/08/16/governor-newsom-and-attorney-general-bonta-on-appellate-court-decision-regarding-californias-age-appropriate-design-code-act/" }
+            ]
+          },
+          {
+            id: "Q5",
+            score: 3,
+            text: "Does the state require AI platforms to detect, escalate, or respond to serious risks such as self-harm, suicide, eating disorders, abuse, exploitation, or crisis situations?",
+            law: "SB 243 (Sec. 22602–22603) — Companion Chatbots",
+            evidence: "SB 243 requires companion chatbot operators to maintain and publicly publish a protocol preventing suicidal ideation/self-harm content and to provide crisis-service referrals (hotlines, crisis text lines) when users express concerning ideation. Beginning July 1, 2027, operators must submit annual reports to the California Office of Suicide Prevention.",
+            note: "Scope is limited to 'companion chatbots' (AI with persistent relationship-like interactions). General-purpose chatbots are not directly covered by SB 243.",
+            sources: [
+              { title: "SB 243 — California Legislature", url: "https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202520260SB243" },
+              { title: "First-in-Nation Chatbot Law — CA Sen. Padilla", url: "https://sd18.senate.ca.gov/news/first-nation-ai-chatbot-safeguards-signed-law" }
+            ]
+          },
+          {
+            id: "Q6",
+            score: 3,
+            text: "Does the state restrict or regulate risky chatbot design features, such as emotionally manipulative engagement, companion/romantic chatbot access for minors, addictive design, or unsafe personalization?",
+            law: "SB 243 (Sec. 22602) — Companion Chatbots",
+            evidence: "SB 243 directly regulates companion chatbot design: operators must default to break reminders every 3 hours for minors, disclose AI nature when users might believe they are talking to a human, and implement mandatory CSAM content prevention. Operators cannot legally deploy a companion chatbot in California without these safeguards in place.",
+            note: "First U.S. law specifically targeting companion chatbot design risks. Focuses on design obligations rather than content restrictions, giving it stronger constitutional durability.",
+            sources: [
+              { title: "SB 243 — California Legislature", url: "https://leginfo.legislature.ca.gov/faces/billTextClient.xhtml?bill_id=202520260SB243" }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+
+};
+
+// FIPS → state name (all 50 states)
+const FIPS_TO_NAME = {
+  "01":"Alabama","02":"Alaska","04":"Arizona","05":"Arkansas","06":"California",
+  "08":"Colorado","09":"Connecticut","10":"Delaware","12":"Florida","13":"Georgia",
+  "15":"Hawaii","16":"Idaho","17":"Illinois","18":"Indiana","19":"Iowa","20":"Kansas",
+  "21":"Kentucky","22":"Louisiana","23":"Maine","24":"Maryland","25":"Massachusetts",
+  "26":"Michigan","27":"Minnesota","28":"Mississippi","29":"Missouri","30":"Montana",
+  "31":"Nebraska","32":"Nevada","33":"New Hampshire","34":"New Jersey","35":"New Mexico",
+  "36":"New York","37":"North Carolina","38":"North Dakota","39":"Ohio","40":"Oklahoma",
+  "41":"Oregon","42":"Pennsylvania","44":"Rhode Island","45":"South Carolina",
+  "46":"South Dakota","47":"Tennessee","48":"Texas","49":"Utah","50":"Vermont",
+  "51":"Virginia","53":"Washington","54":"West Virginia","55":"Wisconsin","56":"Wyoming"
+};
+
+// ════════════════════════════════════════════════════════════════
+// SCORING HELPERS
+// ════════════════════════════════════════════════════════════════
+function normalizedScore(d) {
+  return Math.round((d.rawScore / d.maxRaw) * 100);
+}
+
+function scoreCategory(raw) {
+  if (raw <= 4)  return { label: "Very Weak Protection",    cls: "very-weak",      mapColor: "#dc2626" };
+  if (raw <= 9)  return { label: "Weak Protection",         cls: "weak",           mapColor: "#ea580c" };
+  if (raw <= 14) return { label: "Partial Protection",      cls: "partial",        mapColor: "#ca8a04" };
+  if (raw <= 19) return { label: "Strong Protection",       cls: "strong",         mapColor: "#16a34a" };
+  return           { label: "Comprehensive Protection",     cls: "comprehensive",  mapColor: "#15803d" };
+}
+
+function getStateColor(name) {
+  const d = STATE_DATA[name];
+  if (!d) return "#cbd5e1";
+  return scoreCategory(d.rawScore).mapColor;
+}
+
+function dotColor(cls) {
+  return { "very-weak":"#dc2626","weak":"#ea580c","partial":"#ca8a04","strong":"#16a34a","comprehensive":"#15803d" }[cls] || "#64748b";
+}
+
+// ════════════════════════════════════════════════════════════════
+// BUILD DETAIL PANEL HTML
+// ════════════════════════════════════════════════════════════════
+function buildDetailHTML(name) {
+  const d = STATE_DATA[name];
+  if (!d) {
+    return `<div class="not-scored-msg">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/>
+      </svg>
+      <p><strong>${name}</strong> has not yet been evaluated.</p>
+      <p style="margin-top:6px;font-size:0.75rem;">Scores will appear here once research is complete.</p>
+    </div>`;
+  }
+
+  const raw = d.rawScore;
+  const cat = scoreCategory(raw);
+  const color = dotColor(cat.cls);
+
+  // Category subtotals
+  const catHTML = d.categories.map(cat => {
+    const catTotal = cat.questions.reduce((s, q) => s + q.score, 0);
+    const catMax   = cat.questions.length * 4;
+    const catCls   = scoreCategory(Math.round(catTotal * 24 / catMax)).cls;
+    const catColor = dotColor(catCls);
+
+    const qHTML = cat.questions.map(q => {
+      const dots = Array.from({length: 4}, (_, i) =>
+        `<span class="dot ${i < q.score ? 'filled' : ''}" style="color:${i < q.score ? dotColor(scoreCategory(q.score * 6).cls) : '#e2e8f0'}"></span>`
+      ).join('');
+
+      const srcHTML = q.sources.map(s =>
+        `<a href="${s.url}" target="_blank" rel="noopener">${s.title} ↗</a>`
+      ).join('');
+
+      const noteHTML = q.note
+        ? `<div class="q-note">⚠ ${q.note}</div>`
+        : '';
+
+      return `
+        <div class="q-card">
+          <div class="q-top">
+            <span class="q-num">${q.id}</span>
+            <span class="q-text">${q.text}</span>
+          </div>
+          <div class="q-score-row">
+            <div class="q-dots">${dots}</div>
+            <span class="q-score-num">${q.score}/4</span>
+          </div>
+          <div class="q-law">${q.law}</div>
+          <p class="q-evidence">${q.evidence}</p>
+          ${noteHTML}
+          <div class="q-sources">
+            <div class="q-sources-label">Sources</div>
+            ${srcHTML}
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="category-section">
+        <div class="category-title">
+          ${cat.title}
+          <span class="category-subtotal" style="color:${catColor}">${catTotal}/${catMax}</span>
+        </div>
+        ${qHTML}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="detail-header">
+      <div class="detail-state-name">${name}</div>
+      <button class="btn-close" onclick="closePanel()" title="Close">✕</button>
+    </div>
+
+    <div class="score-summary">
+      <div class="score-circle color-${cat.cls}">
+        <span class="sc-num" style="color:${color}">${raw}</span>
+        <span class="sc-denom" style="color:${color}">/24</span>
+      </div>
+      <div class="score-info">
+        <span class="rating-badge bg-${cat.cls}">${cat.label.toUpperCase()}</span>
+        <div class="score-label">
+          Score: <strong>${raw} / ${d.maxRaw}</strong> &nbsp;·&nbsp; Last updated: ${d.lastUpdated}
+        </div>
+        <div class="score-bar-wrap">
+          <div class="score-bar-fill fill-${cat.cls}" style="width:${Math.round(raw / d.maxRaw * 100)}%"></div>
+        </div>
+        <div class="score-bar-label">0 — Very Weak &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 24 — Comprehensive</div>
+      </div>
+    </div>
+
+    ${catHTML}
+
+    <p style="font-size:0.68rem;color:#94a3b8;margin-top:16px;line-height:1.6;">
+      Methodology note: Each of the six questions is scored 0–4 based on the strength of enacted state law.
+      Proposed-only bills cap at 1. Laws covering only government AI score 1–2 unless the question fits.
+      Court-enjoined laws are discounted. Scores reflect the legal landscape as of ${d.lastUpdated}.
+    </p>`;
+}
+
+// ════════════════════════════════════════════════════════════════
+// MAP RENDERING
+// ════════════════════════════════════════════════════════════════
+let activeState = null;
+
+function openPanel(name) {
+  activeState = name;
+  document.getElementById('detailInner').innerHTML = buildDetailHTML(name);
+  document.getElementById('detailPanel').classList.add('open');
+  document.getElementById('mapPanel').classList.add('panel-open');
+  // Highlight active state
+  d3.selectAll('.state-path').classed('active', d => {
+    const fips = String(d.id).padStart(2, '0');
+    return FIPS_TO_NAME[fips] === name;
+  });
+}
+
+function closePanel() {
+  activeState = null;
+  document.getElementById('detailPanel').classList.remove('open');
+  document.getElementById('mapPanel').classList.remove('panel-open');
+  d3.selectAll('.state-path').classed('active', false);
+}
+
+// ════════════════════════════════════════════════════════════════
+// MAP RENDERING  (with zoom + pan)
+// ════════════════════════════════════════════════════════════════
+const mapDiv = document.getElementById('map');
+const tooltip = document.getElementById('tooltip');
+
+// These are set during renderMap so zoom buttons can reference them
+let _svg, _zoomBehavior;
+
+function zoomIn()    { _svg && _svg.transition().duration(280).call(_zoomBehavior.scaleBy, 2); }
+function zoomOut()   { _svg && _svg.transition().duration(280).call(_zoomBehavior.scaleBy, 0.5); }
+function zoomReset() { _svg && _svg.transition().duration(380).call(_zoomBehavior.transform, d3.zoomIdentity); }
+
+function renderMap() {
+  // Fixed internal coordinate space — AlbersUSA fits well at 960×580
+  const W = 960, H = 580;
+
+  _svg = d3.select('#map').append('svg')
+    .attr('viewBox', `0 0 ${W} ${H}`)
+    .attr('preserveAspectRatio', 'xMidYMid meet')
+    .style('width', '100%')
+    .style('height', '100%');
+
+  // Zoomable container group
+  const g = _svg.append('g');
+
+  // Projection — use fitExtent after features load so nothing is clipped
+  const projection = d3.geoAlbersUsa();
+  const path = d3.geoPath().projection(projection);
+
+  // D3 zoom behavior
+  _zoomBehavior = d3.zoom()
+    .scaleExtent([0.9, 12])
+    .on('start', () => _svg.classed('dragging', true))
+    .on('zoom',  (event) => {
+      g.attr('transform', event.transform);
+      // Keep borders visually thin regardless of zoom level
+      const k = event.transform.k;
+      g.selectAll('.state-path').attr('stroke-width', 0.6 / k);
+      g.select('.state-borders').attr('stroke-width', 0.5 / k);
+    })
+    .on('end', () => _svg.classed('dragging', false));
+
+  _svg.call(_zoomBehavior);
+
+  // Track pointer movement so we can tell click apart from pan
+  let pointerDownPos = null;
+  _svg.on('pointerdown', (e) => { pointerDownPos = [e.clientX, e.clientY]; });
+
+  d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json').then(us => {
+    const features = topojson.feature(us, us.objects.states).features;
+
+    // Fit the projection to the SVG with comfortable padding
+    projection.fitExtent([[30, 20], [W - 30, H - 20]],
+      { type: 'FeatureCollection', features: features });
+
+    // State fills
+    g.selectAll('.state-path')
+      .data(features)
+      .join('path')
+      .attr('class', 'state-path')
+      .attr('d', path)
+      .attr('fill', d => {
+        const fips = String(d.id).padStart(2, '0');
+        return getStateColor(FIPS_TO_NAME[fips]);
+      })
+      .on('mousemove', (event, d) => {
+        tooltip.style.opacity = '0';   // hide while moving
+        const fips = String(d.id).padStart(2, '0');
+        const name = FIPS_TO_NAME[fips] || 'Unknown';
+        const data = STATE_DATA[name];
+        let html = `<div class="tt-state">${name}</div>`;
+        if (data) {
+          const cat = scoreCategory(data.rawScore);
+          html += `<div class="tt-score">${data.rawScore}/24</div>`;
+          html += `<div style="color:#94a3b8;font-size:0.72rem;margin-top:2px">${cat.label}</div>`;
+          html += `<div class="tt-hint">Click for full scorecard →</div>`;
+        } else {
+          html += `<div style="color:#64748b;font-size:0.72rem;margin-top:2px">Not yet evaluated</div>`;
+        }
+        tooltip.innerHTML = html;
+        tooltip.style.opacity = '1';
+        tooltip.style.left = (event.clientX + 16) + 'px';
+        tooltip.style.top  = (event.clientY - 12) + 'px';
+      })
+      .on('mouseleave', () => { tooltip.style.opacity = '0'; })
+      .on('click', (event, d) => {
+        // Ignore if the pointer moved more than 6px (it was a pan, not a click)
+        if (pointerDownPos) {
+          const dx = event.clientX - pointerDownPos[0];
+          const dy = event.clientY - pointerDownPos[1];
+          if (Math.sqrt(dx*dx + dy*dy) > 6) return;
+        }
+        const fips = String(d.id).padStart(2, '0');
+        const name = FIPS_TO_NAME[fips] || 'Unknown';
+        if (activeState === name) { closePanel(); return; }
+        openPanel(name);
+      });
+
+    // State borders (inner borders only — cleaner look)
+    g.append('path')
+      .attr('class', 'state-borders')
+      .datum(topojson.mesh(us, us.objects.states, (a, b) => a !== b))
+      .attr('fill', 'none')
+      .attr('stroke', '#fff')
+      .attr('stroke-width', 0.5)
+      .attr('d', path);
+
+    // Outer nation border
+    g.append('path')
+      .datum(topojson.mesh(us, us.objects.states, (a, b) => a === b))
+      .attr('fill', 'none')
+      .attr('stroke', '#94a3b8')
+      .attr('stroke-width', 0.8)
+      .attr('d', path);
+
+  }).catch(() => {
+    mapDiv.innerHTML = '<p style="color:#94a3b8;padding:40px;text-align:center">Map could not load — internet connection required.</p>';
+  });
+}
+
+renderMap();
+</script>
+</body>
+</html>
